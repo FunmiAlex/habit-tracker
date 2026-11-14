@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>30-Day Habit Squares</title>
+<style>
+  /* Layout: one compact card, 5 x 6 grid of soft squares, reset pill left, count right. Sized to sit in a narrow Notion column. */
+  :root {
+    --page: #ffffff;
+    --card: #f4f1ee;
+    --card-edge: #e4ddd6;
+    --cell: #ffffff;
+    --cell-on: #e6ddd5;
+    --cell-on-shade: rgba(120, 96, 76, 0.18);
+    --ink: #2b2622;
+    --pill: #ffffff;
+    --pill-edge: #d9d1c9;
+    --focus: #a8927e;
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #191715; --card: #262220; --card-edge: #3a332e; --cell: #332e2a;
+      --cell-on: #8c7766; --cell-on-shade: rgba(0,0,0,0.35); --ink: #efe8e1;
+      --pill: #332e2a; --pill-edge: #4a423b; --focus: #c4ae99; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page: #191715; --card: #262220; --card-edge: #3a332e; --cell: #332e2a;
+    --cell-on: #8c7766; --cell-on-shade: rgba(0,0,0,0.35); --ink: #efe8e1;
+    --pill: #332e2a; --pill-edge: #4a423b; --focus: #c4ae99; color-scheme: dark;
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--page); color: var(--ink); font-family: var(--font);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-block: 8px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .card {
+    width: 100%; max-width: 340px; box-sizing: border-box;
+    background: var(--card); border: 1px solid var(--card-edge);
+    border-radius: 28px; padding: 22px 22px 18px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 11px; }
+  .cell {
+    aspect-ratio: 1; max-width: 100%; border: 0; padding: 0; cursor: pointer;
+    border-radius: 12px; background: var(--cell);
+    transition: background-color .15s ease, box-shadow .15s ease, transform .1s ease;
+  }
+  .cell[aria-pressed="true"] {
+    background: var(--cell-on);
+    box-shadow: 0 3px 8px var(--cell-on-shade);
+  }
+  .cell:active { transform: scale(.94); }
+  .cell:focus-visible, .reset:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .reset {
+    font: 600 14px/1 var(--font); letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink); background: var(--pill); border: 1px solid var(--pill-edge);
+    border-radius: 999px; padding: 10px 20px; cursor: pointer;
+  }
+  .count { font-size: 17px; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .cell { transition: none; } .cell:active { transform: none; } }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="grid" id="grid" role="group" aria-label="30 days"></div>
+  <div class="foot">
+    <button type="button" class="reset" id="reset">Reset</button>
+    <span class="count" id="count" aria-live="polite">0/30</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  var DAYS = 30, KEY = "habit-squares-1";
+  var days = new Array(DAYS).fill(false);
+  var grid = document.getElementById("grid");
+  var countEl = document.getElementById("count");
+  var resetBtn = document.getElementById("reset");
+  var cells = [];
+  var remote = null;      // db document ref when signed in
+  var armed = false, armTimer = null;
+
+  for (var i = 0; i < DAYS; i++) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "cell"; b.id = "day-" + (i + 1);
+    b.setAttribute("aria-label", "Day " + (i + 1));
+    b.setAttribute("aria-pressed", "false");
+    b.addEventListener("click", (function (n) { return function () { toggle(n); }; })(i));
+    grid.appendChild(b); cells.push(b);
+  }
+
+  function render() {
+    var done = 0;
+    for (var i = 0; i < DAYS; i++) {
+      cells[i].setAttribute("aria-pressed", days[i] ? "true" : "false");
+      if (days[i]) done++;
+    }
+    countEl.textContent = done + "/" + DAYS;
+  }
+
+  function readLocal() {
+    try { var v = JSON.parse(localStorage.getItem(KEY) || "null"); if (Array.isArray(v) && v.length === DAYS) return v.map(Boolean); } catch (e) {}
+    return null;
+  }
+  function writeLocal() { try { localStorage.setItem(KEY, JSON.stringify(days)); } catch (e) {} }
+
+  var saving = Promise.resolve();
+  function save() {
+    writeLocal();
+    if (remote) {
+      var snapshot = days.slice();
+      saving = saving.then(function () { return remote.set({ days: snapshot, updated: Date.now() }); }).catch(function () {});
+    }
+  }
+
+  function toggle(n) { days[n] = !days[n]; render(); save(); }
+
+  resetBtn.addEventListener("click", function () {
+    if (!armed) {
+      armed = true; resetBtn.textContent = "Sure?";
+      clearTimeout(armTimer);
+      armTimer = setTimeout(function () { armed = false; resetBtn.textContent = "Reset"; }, 3000);
+      return;
+    }
+    clearTimeout(armTimer); armed = false; resetBtn.textContent = "Reset";
+    days = new Array(DAYS).fill(false); render(); save();
+  });
+
+  var local = readLocal(); if (local) days = local;
+  render();
+
+})();
+</script>
+</body>
+</html>
